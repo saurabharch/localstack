@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import re
@@ -10,10 +11,12 @@ from botocore.client import BaseClient
 from localstack.aws.api.events import Arn, InputTransformer, RuleName, Target, TargetInputPath
 from localstack.aws.connect import connect_to
 from localstack.services.events.models import FormattedEvent, TransformedEvent, ValidationException
+from localstack.services.events.utils import EventJSONEncoder, event_time_to_time_string
 from localstack.utils import collections
 from localstack.utils.aws.arns import (
     extract_account_id_from_arn,
     extract_region_from_arn,
+    extract_resource_from_arn,
     extract_service_from_arn,
     firehose_name,
     sqs_queue_url_for_arn,
@@ -72,7 +75,11 @@ def replace_template_placeholders(
     def replace_placeholder(match):
         key = match.group(1)
         value = replacements.get(key, match.group(0))  # handle non defined placeholders
-        return json.dumps(value) if is_json else value
+        if is_json:
+            return json.dumps(value, cls=EventJSONEncoder)
+        if isinstance(value, datetime.datetime):
+            return event_time_to_time_string(value)
+        return value
 
     formatted_template = TRANSFORMER_PLACEHOLDER_PATTERN.sub(replace_placeholder, template)
 
@@ -147,13 +154,17 @@ class TargetSender(ABC):
             self._validate_input_transformer(input_transformer)
 
     def _initialize_client(self) -> BaseClient:
-        """Initializes internal botocore client.
+        """Initializes internal boto client.
         If a role from a target is provided, the client will be initialized with the assumed role.
-        If no role is provided the client will be initialized with the account ID and region.
+        If no role is provided or the role is not in the target account,
+        the client will be initialized with the account ID and region.
         In both cases event bridge is requested as service principal"""
         service_principal = ServicePrincipal.events
-        if role_arn := self.target.get("RoleArn"):
-            # assumed role sessions expires after 6 hours in AWS, currently no expiration in LocalStack
+        role_arn = self.target.get("RoleArn")
+        if role_arn and self.account_id == extract_account_id_from_arn(
+            role_arn
+        ):  # required for cross account
+            # assumed role sessions expire after 6 hours in AWS, currently no expiration in LocalStack
             client_factory = connect_to.with_assumed_role(
                 role_arn=role_arn,
                 service_principal=service_principal,
@@ -238,42 +249,70 @@ class ContainerTargetSender(TargetSender):
 
 class EventsTargetSender(TargetSender):
     def send_event(self, event):
-        eventbus_name = self.target["Arn"].split(":")[-1].split("/")[-1]
-        source = (
-            event.get("source")
-            if event.get("source") is not None
-            else self.service
-            if self.service
-            else ""
-        )
-        detail_type = event.get("detail-type") if event.get("detail-type") is not None else ""
         # TODO add validation and tests for eventbridge to eventbridge requires Detail, DetailType, and Source
         # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/events/client/put_events.html
+        event_bus_name = extract_resource_from_arn(self.target["Arn"]).split("/")[-1]
+        source = self._get_source(event)
+        detail_type = self._get_detail_type(event)
         detail = event.get("detail", event)
-        resources = (
-            event.get("resources")
-            if event.get("resources") is not None
-            else ([self.rule_arn] if self.rule_arn else [])
-        )
+        resources = self._get_resources(event)
+        entries = [
+            {
+                "EventBusName": event_bus_name,
+                "Source": source,
+                "DetailType": detail_type,
+                "Detail": json.dumps(detail),
+                "Resources": resources,
+            }
+        ]
+        if encoded_original_id := self._get_trace_header_encoded_region_account(event):
+            entries[0]["TraceHeader"] = encoded_original_id
+        self.client.put_events(Entries=entries)
 
-        self.client.put_events(
-            Entries=[
+    def _get_trace_header_encoded_region_account(self, event: FormattedEvent) -> str | None:
+        """Encode the original region and account_id for cross-region and cross-account
+        event bus communication in the trace header. For event bus to event bus communication
+        in a different account the event id is preserved. This is not the case if the region differs."""
+        original_id = event.get("id")
+        original_account = event.get("account")
+        original_region = event.get("region")
+        if original_region != self.region and original_account != self.account_id:
+            return json.dumps(
                 {
-                    "EventBusName": eventbus_name,
-                    "Source": source,
-                    "DetailType": detail_type,
-                    "Detail": json.dumps(detail),
-                    "Resources": resources,
+                    "original_region": original_region,
+                    "original_account": original_account,
                 }
-            ]
-        )
+            )
+        if original_region != self.region:
+            return json.dumps({"original_region": original_region})
+        if original_account != self.account_id:
+            return json.dumps({"original_id": original_id, "original_account": original_account})
+
+    def _get_source(self, event: FormattedEvent | TransformedEvent) -> str:
+        if isinstance(event, dict) and (source := event.get("source")):
+            return source
+        else:
+            return self.service or ""
+
+    def _get_detail_type(self, event: FormattedEvent | TransformedEvent) -> str:
+        if isinstance(event, dict) and (detail_type := event.get("detail-type")):
+            return detail_type
+        else:
+            return ""
+
+    def _get_resources(self, event: FormattedEvent | TransformedEvent) -> list[str]:
+        if isinstance(event, dict) and (resources := event.get("resources")):
+            return resources
+        else:
+            return []
 
 
 class FirehoseTargetSender(TargetSender):
     def send_event(self, event):
         delivery_stream_name = firehose_name(self.target["Arn"])
         self.client.put_record(
-            DeliveryStreamName=delivery_stream_name, Record={"Data": to_bytes(json.dumps(event))}
+            DeliveryStreamName=delivery_stream_name,
+            Record={"Data": to_bytes(json.dumps(event, cls=EventJSONEncoder))},
         )
 
 
@@ -284,7 +323,7 @@ class KinesisTargetSender(TargetSender):
         partition_key = event.get(partition_key_path, event["id"])
         self.client.put_record(
             StreamName=stream_name,
-            Data=to_bytes(json.dumps(event)),
+            Data=to_bytes(json.dumps(event, cls=EventJSONEncoder)),
             PartitionKey=partition_key,
         )
 
@@ -301,7 +340,7 @@ class LambdaTargetSender(TargetSender):
         asynchronous = True  # TODO clarify default behavior of AWS
         self.client.invoke(
             FunctionName=self.target["Arn"],
-            Payload=to_bytes(json.dumps(event)),
+            Payload=to_bytes(json.dumps(event, cls=EventJSONEncoder)),
             InvocationType="Event" if asynchronous else "RequestResponse",
         )
 
@@ -314,7 +353,12 @@ class LogsTargetSender(TargetSender):
         self.client.put_log_events(
             logGroupName=log_group_name,
             logStreamName=log_stream_name,
-            logEvents=[{"timestamp": now_utc(millis=True), "message": json.dumps(event)}],
+            logEvents=[
+                {
+                    "timestamp": now_utc(millis=True),
+                    "message": json.dumps(event, cls=EventJSONEncoder),
+                }
+            ],
         )
 
 
@@ -335,7 +379,9 @@ class SagemakerTargetSender(TargetSender):
 
 class SnsTargetSender(TargetSender):
     def send_event(self, event):
-        self.client.publish(TopicArn=self.target["Arn"], Message=json.dumps(event))
+        self.client.publish(
+            TopicArn=self.target["Arn"], Message=json.dumps(event, cls=EventJSONEncoder)
+        )
 
 
 class SqsTargetSender(TargetSender):
@@ -344,7 +390,13 @@ class SqsTargetSender(TargetSender):
         msg_group_id = self.target.get("SqsParameters", {}).get("MessageGroupId", None)
         kwargs = {"MessageGroupId": msg_group_id} if msg_group_id else {}
         self.client.send_message(
-            QueueUrl=queue_url, MessageBody=json.dumps(event, separators=(",", ":")), **kwargs
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(
+                event,
+                separators=(",", ":"),
+                cls=EventJSONEncoder,
+            ),
+            **kwargs,
         )
 
 
@@ -352,7 +404,9 @@ class StatesTargetSender(TargetSender):
     """Step Functions Target Sender"""
 
     def send_event(self, event):
-        self.client.start_execution(stateMachineArn=self.target["Arn"], input=json.dumps(event))
+        self.client.start_execution(
+            stateMachineArn=self.target["Arn"], input=json.dumps(event, cls=EventJSONEncoder)
+        )
 
     def _validate_input(self, target: Target):
         super()._validate_input(target)
