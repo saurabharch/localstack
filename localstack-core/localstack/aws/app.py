@@ -28,8 +28,7 @@ class LocalstackAwsGateway(Gateway):
         # the main request handler chain
         self.request_handlers.extend(
             [
-                handlers.push_request_context,
-                handlers.add_internal_request_params,  # initialise DTO for internal AWS calls
+                handlers.add_internal_request_params,
                 handlers.handle_runtime_shutdown,
                 metric_collector.create_metric_handler_item,
                 load_service_for_data_plane,
@@ -84,7 +83,6 @@ class LocalstackAwsGateway(Gateway):
             [
                 handlers.set_close_connection_header,
                 handlers.run_custom_finalizers,
-                handlers.pop_request_context,
             ]
         )
 
