@@ -905,6 +905,10 @@ LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT = int(os.environ.get("LAMBDA_RUNTIME_ENVIRONM
 # b) json dict mapping the <runtime> to an image, e.g. {"python3.9": "custom-repo/lambda-py:thon3.9"}
 LAMBDA_RUNTIME_IMAGE_MAPPING = os.environ.get("LAMBDA_RUNTIME_IMAGE_MAPPING", "").strip()
 
+# PUBLIC: 0 (default)
+# Whether to disable usage of deprecated runtimes
+LAMBDA_RUNTIME_VALIDATION = int(os.environ.get("LAMBDA_RUNTIME_VALIDATION") or 0)
+
 # PUBLIC: 1 (default)
 # Whether to remove any Lambda Docker containers.
 LAMBDA_REMOVE_CONTAINERS = (
@@ -1050,6 +1054,13 @@ CFN_VERBOSE_ERRORS = is_env_true("CFN_VERBOSE_ERRORS")
 # Allow fallback to previous template deployer implementation
 CFN_LEGACY_TEMPLATE_DEPLOYER = is_env_true("CFN_LEGACY_TEMPLATE_DEPLOYER")
 
+# The CFN_STRING_REPLACEMENT_DENY_LIST env variable is a comma separated list of strings that are not allowed to be
+# replaced in CloudFormation templates (e.g. AWS URLs that are usually edited by Localstack to point to itself if found
+# in a CFN template). They are extracted to a list of strings if the env variable is set.
+CFN_STRING_REPLACEMENT_DENY_LIST = [
+    x for x in os.environ.get("CFN_STRING_REPLACEMENT_DENY_LIST", "").split(",") if x
+]
+
 # Set the timeout to deploy each individual CloudFormation resource
 CFN_PER_RESOURCE_TIMEOUT = int(os.environ.get("CFN_PER_RESOURCE_TIMEOUT") or 300)
 
@@ -1100,6 +1111,9 @@ DISABLE_BOTO_RETRIES = is_env_true("DISABLE_BOTO_RETRIES")
 
 DISTRIBUTED_MODE = is_env_true("DISTRIBUTED_MODE")
 
+# This flag enables `connect_to` to be in-memory only and not do networking calls
+IN_MEMORY_CLIENT = is_env_true("IN_MEMORY_CLIENT")
+
 # List of environment variable names used for configuration that are passed from the host into the LocalStack container.
 # => Synchronize this list with the above and the configuration docs:
 # https://docs.localstack.cloud/references/configuration/
@@ -1114,6 +1128,7 @@ CONFIG_ENV_VARS = [
     "BUCKET_MARKER_LOCAL",
     "CFN_IGNORE_UNSUPPORTED_RESOURCE_TYPES",
     "CFN_LEGACY_TEMPLATE_DEPLOYER",
+    "CFN_STRING_REPLACEMENT_DENY_LIST",
     "CFN_VERBOSE_ERRORS",
     "CI",
     "CUSTOM_SSL_CERT_PATH",
@@ -1156,6 +1171,7 @@ CONFIG_ENV_VARS = [
     "GATEWAY_WORKER_THREAD_COUNT",
     "HOSTNAME",
     "HOSTNAME_FROM_LAMBDA",
+    "IN_MEMORY_CLIENT",
     "KINESIS_ERROR_PROBABILITY",
     "KINESIS_MOCK_PERSIST_INTERVAL",
     "KINESIS_MOCK_LOG_LEVEL",
@@ -1180,6 +1196,7 @@ CONFIG_ENV_VARS = [
     "LAMBDA_REMOVE_CONTAINERS",
     "LAMBDA_RUNTIME_EXECUTOR",
     "LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT",
+    "LAMBDA_RUNTIME_VALIDATION",
     "LAMBDA_TRUNCATE_STDOUT",
     "LAMBDA_RETRY_BASE_DELAY_SECONDS",
     "LAMBDA_SYNCHRONOUS_CREATE",

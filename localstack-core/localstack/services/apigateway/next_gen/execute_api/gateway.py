@@ -21,7 +21,9 @@ class RestApiGateway(Gateway):
         self.request_handlers.extend(
             [
                 handlers.parse_request,
+                handlers.route_request,
                 handlers.preprocess_request,
+                handlers.api_key_validation_handler,
                 handlers.method_request_handler,
                 handlers.integration_request_handler,
                 handlers.integration_handler,
@@ -36,8 +38,11 @@ class RestApiGateway(Gateway):
                 # add composite response handlers?
             ]
         )
-        # TODO: we need the exception handler instead of serializing them
-        self.exception_handlers.extend([])
+        self.exception_handlers.extend(
+            [
+                handlers.gateway_exception_handler,
+            ]
+        )
 
     def process_with_context(self, context: RestApiInvocationContext, response: Response):
         chain = self.new_chain()

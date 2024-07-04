@@ -13,8 +13,11 @@ from localstack.utils.aws import arns, resources
 from localstack.utils.strings import short_uid
 from localstack.utils.sync import retry
 from localstack.utils.testutil import check_expected_lambda_log_events_length
-from tests.aws.services.events.conftest import assert_valid_event
-from tests.aws.services.events.helper_functions import is_v2_provider, sqs_collect_messages
+from tests.aws.services.events.helper_functions import (
+    assert_valid_event,
+    is_v2_provider,
+    sqs_collect_messages,
+)
 from tests.aws.services.events.test_events import EVENT_DETAIL, TEST_EVENT_PATTERN
 from tests.aws.services.lambda_.test_lambda import TEST_LAMBDA_PYTHON_ECHO
 
@@ -171,7 +174,7 @@ def test_put_events_with_target_sns(
         ]
     )
 
-    messages = sqs_collect_messages(aws_client, queue_url, min_events=1, retries=3)
+    messages = sqs_collect_messages(aws_client, queue_url, expected_events_count=1, retries=3)
     assert len(messages) == 1
 
     actual_event = json.loads(messages[0]["Body"]).get("Message")
@@ -202,7 +205,7 @@ def test_put_events_with_target_lambda(create_lambda_function, cleanups, aws_cli
     rs = create_lambda_function(
         handler_file=TEST_LAMBDA_PYTHON_ECHO,
         func_name=function_name,
-        runtime=Runtime.python3_9,
+        runtime=Runtime.python3_12,
     )
 
     func_arn = rs["CreateFunctionResponse"]["FunctionArn"]
@@ -451,7 +454,7 @@ def test_should_ignore_schedules_for_put_event(create_lambda_function, cleanups,
     create_lambda_function(
         func_name=fn_name,
         handler_file=TEST_LAMBDA_PYTHON_ECHO,
-        runtime=Runtime.python3_9,
+        runtime=Runtime.python3_12,
         client=aws_client.lambda_,
     )
 
