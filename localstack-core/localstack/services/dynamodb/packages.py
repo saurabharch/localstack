@@ -20,7 +20,7 @@ DDB_PATCH_URL_PREFIX = (
 )
 DDB_AGENT_JAR_URL = f"{DDB_PATCH_URL_PREFIX}/target/ddb-local-loader-0.1.jar"
 
-DYNAMODB_JAR_URL = "https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.zip"
+DDBLOCAL_ZIP_URL = "https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.zip"
 JAVASSIST_JAR_URL = f"{MAVEN_REPO_URL}/org/javassist/javassist/3.28.0-GA/javassist-3.28.0-GA.jar"
 
 
@@ -43,7 +43,7 @@ class DynamoDBLocalPackageInstaller(PackageInstaller):
         # download and extract archive
         tmp_archive = os.path.join(config.dirs.cache, "localstack.ddb.zip")
         install_dir = self._get_install_dir(target)
-        download_and_extract_with_retry(DYNAMODB_JAR_URL, tmp_archive, install_dir)
+        download_and_extract_with_retry(DDBLOCAL_ZIP_URL, tmp_archive, install_dir)
 
         # fix logging configuration for DynamoDBLocal
         log4j2_config = """<Configuration status="WARN">
