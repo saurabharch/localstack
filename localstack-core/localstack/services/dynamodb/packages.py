@@ -14,14 +14,9 @@ from localstack.utils.functions import run_safe
 from localstack.utils.http import download
 from localstack.utils.run import run
 
-# patches for DynamoDB Local
-DDB_PATCH_URL_PREFIX = (
-    f"{ARTIFACTS_REPO}/raw/388cd73f45bfd3bcf7ad40aa35499093061c7962/dynamodb-local-patch"
-)
-DDB_AGENT_JAR_URL = f"{DDB_PATCH_URL_PREFIX}/target/ddb-local-loader-0.1.jar"
-
+DDB_AGENT_JAR_URL = f"{ARTIFACTS_REPO}/raw/388cd73f45bfd3bcf7ad40aa35499093061c7962/dynamodb-local-patch/target/ddb-local-loader-0.1.jar"
 DDBLOCAL_ZIP_URL = "https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.zip"
-JAVASSIST_JAR_URL = f"{MAVEN_REPO_URL}/org/javassist/javassist/3.28.0-GA/javassist-3.28.0-GA.jar"
+JAVASSIST_JAR_URL = f"{MAVEN_REPO_URL}/org/javassist/javassist/3.30.2-GA/javassist-3.30.2-GA.jar"
 
 
 class DynamoDBLocalPackage(Package):
