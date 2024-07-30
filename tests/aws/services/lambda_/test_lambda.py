@@ -1147,6 +1147,75 @@ class TestLambdaURL:
         assert result.status_code == 502
 
     @markers.aws.validated
+    def test_lambda_url_persists_after_alias_delete(
+        self, create_lambda_function, snapshot, aws_client
+    ):
+        snapshot.add_transformer(
+            snapshot.transform.key_value(
+                "FunctionUrl", "<function-url>", reference_replacement=False
+            )
+        )
+        function_name = f"test-fnurl-echo-{short_uid()}"
+        alias_name = f"alias-{short_uid()}"
+
+        create_lambda_function(
+            func_name=function_name,
+            handler_file=TEST_LAMBDA_URL,
+            runtime=Runtime.nodejs20_x,
+        )
+
+        fn_version_v1 = aws_client.lambda_.publish_version(FunctionName=function_name).get(
+            "Version"
+        )
+
+        aws_client.lambda_.create_alias(
+            FunctionName=function_name, FunctionVersion=fn_version_v1, Name=alias_name
+        )
+
+        aws_client.lambda_.get_waiter(waiter_name="function_updated_v2").wait(
+            FunctionName=function_name, Qualifier=alias_name
+        )
+
+        # Create an aliased URL
+        url_config = aws_client.lambda_.create_function_url_config(
+            FunctionName=function_name,
+            AuthType="NONE",
+            InvokeMode=InvokeMode.BUFFERED,
+            Qualifier=alias_name,
+        )
+        snapshot.match("create_lambda_url_config", url_config)
+
+        aws_client.lambda_.get_waiter(waiter_name="function_active_v2").wait(
+            FunctionName=function_name, Qualifier=alias_name
+        )
+
+        delete_alias_resp = aws_client.lambda_.delete_alias(
+            FunctionName=function_name, Name=alias_name
+        )
+        snapshot.match("delete_alias_resp", delete_alias_resp)
+
+        # Confirm the alias has deleted successfully
+        def _assert_alias_deleted():
+            assert (
+                len(
+                    aws_client.lambda_.list_aliases(
+                        FunctionName=function_name, FunctionVersion=fn_version_v1
+                    ).get("Aliases")
+                )
+                == 0
+            )
+
+        retry(_assert_alias_deleted, retries=15)
+
+        get_url_config = aws_client.lambda_.get_function_url_config(
+            FunctionName=function_name, Qualifier=alias_name
+        )
+        snapshot.match("get_url_config", get_url_config)
+
+        assert get_url_config.get("FunctionArn") == url_config.get("FunctionArn")
+        assert get_url_config.get("FunctionUrl") == url_config.get("FunctionUrl")
+
+    @markers.aws.validated
     def test_lambda_url_invalid_invoke_mode(self, create_lambda_function, snapshot, aws_client):
         function_name = f"test-fn-echo-{short_uid()}"
 
